@@ -1,11 +1,17 @@
-import { IBook } from "../models/book.model";
-import { BookSchemaBase, IBookBase } from "../models/book.schema";
+import {
+  IBook,
+  IRepository,
+  IBookBase,
+  FilterOptions,
+  SortOptions,
+} from "@/src/lib/definitions";
+import { BookSchemaBase } from "@/src/models/book.schema";
 import { IPagedResponse, IPageRequest } from "@/src/lib/definitions";
 import { MySql2Database } from "drizzle-orm/mysql2";
-import { count, eq, like, or, sql } from "drizzle-orm";
-import { books } from "../orm/schema";
+import { count, eq, desc, asc, sql } from "drizzle-orm";
+import { books } from "@/src/orm/schema";
 
-export class BookRepository {
+export class BookRepository implements IRepository<IBookBase, IBook> {
   constructor(private readonly db: MySql2Database<Record<string, never>>) {}
 
   async create(data: IBookBase): Promise<IBook> {
@@ -17,12 +23,9 @@ export class BookRepository {
     };
 
     try {
-      const [insertId] = await this.db
-        .insert(books)
-        .values(newBook)
-        .$returningId();
+      const [result] = await this.db.insert(books).values(newBook);
 
-      return await this.getById(insertId.id);
+      return await this.getById(result.insertId);
     } catch (error) {
       throw new Error(`Error creating book: ${(error as Error).message}`);
     }
@@ -32,36 +35,43 @@ export class BookRepository {
     id: number,
     data: IBookBase,
     availableNumOfCopies?: number
-  ): Promise<IBook> {
-    const bookToUpdate = await this.getById(id);
-    if (!bookToUpdate) {
-      throw new Error("Book not found");
-    }
-
-    const validatedData = BookSchemaBase.parse(data);
-    const updatedBook: IBook = {
-      ...bookToUpdate,
-      ...validatedData,
-      availableNumOfCopies:
-        availableNumOfCopies !== undefined
-          ? availableNumOfCopies
-          : validatedData.totalNumOfCopies -
-            (bookToUpdate.totalNumOfCopies - bookToUpdate.availableNumOfCopies),
-    };
-
+  ): Promise<IBook | undefined> {
     try {
+      const bookToUpdate = await this.getById(id);
+      if (!bookToUpdate) {
+        throw new Error("Book not found");
+      }
+
+      const validatedData = BookSchemaBase.parse(data);
+
+      const updatedAvailableCopies =
+        availableNumOfCopies ??
+        validatedData.totalNumOfCopies -
+          (bookToUpdate.totalNumOfCopies - bookToUpdate.availableNumOfCopies);
+
+      const updatedBook: IBook = {
+        ...bookToUpdate,
+        ...validatedData,
+        availableNumOfCopies: updatedAvailableCopies,
+      };
+
+      console.log("Updating book:", updatedBook);
+
       const [result] = await this.db
         .update(books)
         .set(updatedBook)
         .where(eq(books.id, id))
         .execute();
+
       if (result.affectedRows > 0) {
+        console.log(`Book successfully updated.`);
         return await this.getById(id);
       } else {
-        throw new Error("Could not update book");
+        throw new Error("Failed to update the book");
       }
     } catch (error) {
-      throw new Error("Could not update book");
+      console.error(`Error updating book:`, (error as Error).message);
+      throw new Error(`Error updating book: ${(error as Error).message}`);
     }
   }
 
@@ -100,12 +110,26 @@ export class BookRepository {
     }
   }
 
-  async list(params: IPageRequest): Promise<IPagedResponse<IBook> | undefined> {
-    let searchWhereClause;
+  async list(
+    params: IPageRequest,
+    sortOptions?: SortOptions<IBook>,
+    filterOptions?: FilterOptions<IBook>
+  ): Promise<IPagedResponse<IBook> | undefined> {
+    if (!this.db) {
+      return;
+    }
+    let searchWhereClause = sql`1 = 1`;
+    let sortOrder = sql``;
 
     if (params.search) {
       const search = `%${params.search.toLowerCase()}%`;
       searchWhereClause = sql`${books.title} LIKE ${search} OR ${books.isbnNo} LIKE ${search}`;
+    }
+
+    if (sortOptions) {
+      const sortBy = books[sortOptions.sortBy] || books.author;
+      sortOrder =
+        sortOptions?.sortOrder === "desc" ? desc(sortBy) : asc(sortBy);
     }
     try {
       const matchedBooks = (await this.db
@@ -113,7 +137,8 @@ export class BookRepository {
         .from(books)
         .where(searchWhereClause)
         .offset(params.offset)
-        .limit(params.limit)) as IBook[];
+        .limit(params.limit)
+        .orderBy(sortOrder)) as IBook[];
 
       if (matchedBooks.length > 0) {
         const [totalMatchedBooks] = await this.db

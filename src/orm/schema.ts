@@ -18,15 +18,20 @@ export const books = mysqlTable("books", {
   numOfPages: int("numOfPages").notNull(),
   totalNumOfCopies: int("totalNumOfCopies").notNull(),
   availableNumOfCopies: int("availableNumOfCopies").notNull(),
+  coverImage: varchar("coverImage", { length: 500 }),
+  price: int("price").notNull(),
 });
 
 // Members Table
 export const members = mysqlTable("members", {
   id: serial("id"),
   name: varchar("name", { length: 35 }).notNull(),
-  age: int("age").notNull(),
+  age: int("age"),
   email: varchar("email", { length: 255 }).unique().notNull(),
-  password: varchar("password", { length: 255 }).unique().notNull(),
+  phone: varchar("phone", { length: 10 }),
+  address: varchar("address", { length: 255 }),
+  password: varchar("password", { length: 255 }).unique(),
+  image: varchar("coverImage", { length: 500 }),
   role: mysqlEnum("role", ["user", "admin"]).notNull().default("user"),
 });
 
@@ -39,9 +44,12 @@ export const transactions = mysqlTable("transactions", {
   bookId: bigint("bookId", { mode: "bigint", unsigned: true })
     .references(() => books.id, { onDelete: "cascade" })
     .notNull(),
-  bookStatus: varchar("bookStatus", { length: 35 }).notNull(),
-  dateOfIssue: varchar("dateOfIssue", { length: 15 }).notNull(),
-  dueDate: varchar("dueDate", { length: 15 }).notNull(),
+  bookStatus: varchar("bookStatus", {
+    length: 35,
+    enum: ["pending", "rejected", "issued", "returned"],
+  }).notNull(),
+  dateOfIssue: varchar("dateOfIssue", { length: 25 }),
+  dueDate: varchar("dueDate", { length: 25 }),
 });
 
 export const memberTokens = mysqlTable("memberTokens", {
